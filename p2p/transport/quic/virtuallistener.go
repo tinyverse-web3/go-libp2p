@@ -70,7 +70,7 @@ func (r *acceptLoopRunner) RmAcceptForVersion(v quic.VersionNumber) {
 
 	ch, ok := r.muxer[v]
 	if !ok {
-		panic("expected chan in accept muxer")
+		return
 	}
 	ch <- acceptVal{err: errors.New("listener Accept closed")}
 	delete(r.muxer, v)
