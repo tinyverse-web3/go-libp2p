@@ -1,15 +1,15 @@
-package connectiongating
+package transport_integration
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+
+	"github.com/libp2p/go-libp2p/core/network"
+
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/golang/mock/gomock"
@@ -17,21 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:generate go run github.com/golang/mock/mockgen -package connectiongating -destination mock_connection_gater_test.go github.com/libp2p/go-libp2p/core/connmgr ConnectionGater
-
-// This list should contain (at least) one address for every transport we have.
-var addrs = []ma.Multiaddr{
-	ma.StringCast("/ip4/127.0.0.1/tcp/0"),
-	ma.StringCast("/ip4/127.0.0.1/tcp/0/ws"),
-	ma.StringCast("/ip4/127.0.0.1/udp/0/quic"),
-	ma.StringCast("/ip4/127.0.0.1/udp/0/quic-v1"),
-	ma.StringCast("/ip4/127.0.0.1/udp/0/quic-v1/webtransport"),
-}
-
-func transportName(a ma.Multiaddr) string {
-	_, tr := ma.SplitLast(a)
-	return tr.Protocol().Name
-}
+//go:generate go run github.com/golang/mock/mockgen -package transport_integration -destination mock_connection_gater_test.go github.com/libp2p/go-libp2p/core/connmgr ConnectionGater
 
 func stripCertHash(addr ma.Multiaddr) ma.Multiaddr {
 	for {
@@ -44,18 +30,14 @@ func stripCertHash(addr ma.Multiaddr) ma.Multiaddr {
 }
 
 func TestInterceptPeerDial(t *testing.T) {
-	for _, a := range addrs {
-		t.Run(fmt.Sprintf("dialing %s", transportName(a)), func(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			connGater := NewMockConnectionGater(ctrl)
 
-			h1, err := libp2p.New(libp2p.ConnectionGater(connGater))
-			require.NoError(t, err)
-			defer h1.Close()
-			h2, err := libp2p.New(libp2p.ListenAddrs(a))
-			require.NoError(t, err)
-			defer h2.Close()
+			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true, ConnGater: connGater})
+			h2 := tc.HostGenerator(t, TransportTestCaseOpts{})
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -67,18 +49,14 @@ func TestInterceptPeerDial(t *testing.T) {
 }
 
 func TestInterceptAddrDial(t *testing.T) {
-	for _, a := range addrs {
-		t.Run(fmt.Sprintf("dialing %s", transportName(a)), func(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			connGater := NewMockConnectionGater(ctrl)
 
-			h1, err := libp2p.New(libp2p.ConnectionGater(connGater))
-			require.NoError(t, err)
-			defer h1.Close()
-			h2, err := libp2p.New(libp2p.ListenAddrs(a))
-			require.NoError(t, err)
-			defer h2.Close()
+			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true, ConnGater: connGater})
+			h2 := tc.HostGenerator(t, TransportTestCaseOpts{})
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -93,18 +71,15 @@ func TestInterceptAddrDial(t *testing.T) {
 }
 
 func TestInterceptSecuredOutgoing(t *testing.T) {
-	for _, a := range addrs {
-		t.Run(fmt.Sprintf("dialing %s", transportName(a)), func(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			connGater := NewMockConnectionGater(ctrl)
 
-			h1, err := libp2p.New(libp2p.ConnectionGater(connGater))
-			require.NoError(t, err)
-			defer h1.Close()
-			h2, err := libp2p.New(libp2p.ListenAddrs(a))
-			require.NoError(t, err)
-			defer h2.Close()
+			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true, ConnGater: connGater})
+			h2 := tc.HostGenerator(t, TransportTestCaseOpts{})
+			require.Len(t, h2.Addrs(), 1)
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -117,11 +92,10 @@ func TestInterceptSecuredOutgoing(t *testing.T) {
 					require.Equal(t, stripCertHash(h2.Addrs()[0]).String(), addrs.RemoteMultiaddr().String())
 				}),
 			)
-			err = h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
-			require.Error(t, err)
+			require.Error(t, h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()}))
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
-			if _, err := a.ValueForProtocol(ma.P_WS); err == nil {
+			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
 				require.NotErrorIs(t, err, context.DeadlineExceeded)
 			}
 		})
@@ -129,18 +103,15 @@ func TestInterceptSecuredOutgoing(t *testing.T) {
 }
 
 func TestInterceptUpgradedOutgoing(t *testing.T) {
-	for _, a := range addrs {
-		t.Run(fmt.Sprintf("dialing %s", transportName(a)), func(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			connGater := NewMockConnectionGater(ctrl)
 
-			h1, err := libp2p.New(libp2p.ConnectionGater(connGater))
-			require.NoError(t, err)
-			defer h1.Close()
-			h2, err := libp2p.New(libp2p.ListenAddrs(a))
-			require.NoError(t, err)
-			defer h2.Close()
+			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true, ConnGater: connGater})
+			h2 := tc.HostGenerator(t, TransportTestCaseOpts{})
+			require.Len(t, h2.Addrs(), 1)
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -155,11 +126,10 @@ func TestInterceptUpgradedOutgoing(t *testing.T) {
 					require.Equal(t, h1.ID(), c.LocalPeer())
 					require.Equal(t, h2.ID(), c.RemotePeer())
 				}))
-			err = h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
-			require.Error(t, err)
+			require.Error(t, h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()}))
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
-			if _, err := a.ValueForProtocol(ma.P_WS); err == nil {
+			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
 				require.NotErrorIs(t, err, context.DeadlineExceeded)
 			}
 		})
@@ -167,21 +137,14 @@ func TestInterceptUpgradedOutgoing(t *testing.T) {
 }
 
 func TestInterceptAccept(t *testing.T) {
-	for _, a := range addrs {
-		t.Run(fmt.Sprintf("accepting %s", transportName(a)), func(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			connGater := NewMockConnectionGater(ctrl)
 
-			h1, err := libp2p.New()
-			require.NoError(t, err)
-			defer h1.Close()
-			h2, err := libp2p.New(
-				libp2p.ListenAddrs(a),
-				libp2p.ConnectionGater(connGater),
-			)
-			require.NoError(t, err)
-			defer h2.Close()
+			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true})
+			h2 := tc.HostGenerator(t, TransportTestCaseOpts{ConnGater: connGater})
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -192,11 +155,11 @@ func TestInterceptAccept(t *testing.T) {
 				require.Equal(t, stripCertHash(h2.Addrs()[0]), addrs.LocalMultiaddr())
 			})
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
-			_, err = h1.NewStream(ctx, h2.ID(), protocol.TestingID)
+			_, err := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
 			require.Error(t, err)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
-			if _, err := a.ValueForProtocol(ma.P_WS); err == nil {
+			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
 				require.NotErrorIs(t, err, context.DeadlineExceeded)
 			}
 		})
@@ -204,21 +167,14 @@ func TestInterceptAccept(t *testing.T) {
 }
 
 func TestInterceptSecuredIncoming(t *testing.T) {
-	for _, a := range addrs {
-		t.Run(fmt.Sprintf("accepting %s", transportName(a)), func(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			connGater := NewMockConnectionGater(ctrl)
 
-			h1, err := libp2p.New()
-			require.NoError(t, err)
-			defer h1.Close()
-			h2, err := libp2p.New(
-				libp2p.ListenAddrs(a),
-				libp2p.ConnectionGater(connGater),
-			)
-			require.NoError(t, err)
-			defer h2.Close()
+			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true})
+			h2 := tc.HostGenerator(t, TransportTestCaseOpts{ConnGater: connGater})
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -231,11 +187,11 @@ func TestInterceptSecuredIncoming(t *testing.T) {
 				}),
 			)
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
-			_, err = h1.NewStream(ctx, h2.ID(), protocol.TestingID)
+			_, err := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
 			require.Error(t, err)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
-			if _, err := a.ValueForProtocol(ma.P_WS); err == nil {
+			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
 				require.NotErrorIs(t, err, context.DeadlineExceeded)
 			}
 		})
@@ -243,22 +199,14 @@ func TestInterceptSecuredIncoming(t *testing.T) {
 }
 
 func TestInterceptUpgradedIncoming(t *testing.T) {
-	for _, a := range addrs {
-		_, tr := ma.SplitLast(a)
-		t.Run(fmt.Sprintf("accepting %s", tr.Protocol().Name), func(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			connGater := NewMockConnectionGater(ctrl)
 
-			h1, err := libp2p.New()
-			require.NoError(t, err)
-			defer h1.Close()
-			h2, err := libp2p.New(
-				libp2p.ListenAddrs(a),
-				libp2p.ConnectionGater(connGater),
-			)
-			require.NoError(t, err)
-			defer h2.Close()
+			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true})
+			h2 := tc.HostGenerator(t, TransportTestCaseOpts{ConnGater: connGater})
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -274,11 +222,11 @@ func TestInterceptUpgradedIncoming(t *testing.T) {
 				}),
 			)
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
-			_, err = h1.NewStream(ctx, h2.ID(), protocol.TestingID)
+			_, err := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
 			require.Error(t, err)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
-			if _, err := a.ValueForProtocol(ma.P_WS); err == nil {
+			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
 				require.NotErrorIs(t, err, context.DeadlineExceeded)
 			}
 		})
