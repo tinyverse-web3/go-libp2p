@@ -92,11 +92,12 @@ func TestInterceptSecuredOutgoing(t *testing.T) {
 					require.Equal(t, stripCertHash(h2.Addrs()[0]).String(), addrs.RemoteMultiaddr().String())
 				}),
 			)
-			require.Error(t, h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()}))
+			cerr := h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+			require.Error(t, cerr)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
 			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
-				require.NotErrorIs(t, err, context.DeadlineExceeded)
+				require.NotErrorIs(t, cerr, context.DeadlineExceeded)
 			}
 		})
 	}
@@ -126,11 +127,12 @@ func TestInterceptUpgradedOutgoing(t *testing.T) {
 					require.Equal(t, h1.ID(), c.LocalPeer())
 					require.Equal(t, h2.ID(), c.RemotePeer())
 				}))
-			require.Error(t, h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()}))
+			cerr := h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+			require.Error(t, cerr)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
 			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
-				require.NotErrorIs(t, err, context.DeadlineExceeded)
+				require.NotErrorIs(t, cerr, context.DeadlineExceeded)
 			}
 		})
 	}
@@ -155,12 +157,12 @@ func TestInterceptAccept(t *testing.T) {
 				require.Equal(t, stripCertHash(h2.Addrs()[0]), addrs.LocalMultiaddr())
 			})
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
-			_, err := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
-			require.Error(t, err)
+			_, cerr := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
+			require.Error(t, cerr)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
 			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
-				require.NotErrorIs(t, err, context.DeadlineExceeded)
+				require.NotErrorIs(t, cerr, context.DeadlineExceeded)
 			}
 		})
 	}
@@ -187,12 +189,12 @@ func TestInterceptSecuredIncoming(t *testing.T) {
 				}),
 			)
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
-			_, err := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
-			require.Error(t, err)
+			_, cerr := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
+			require.Error(t, cerr)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
 			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
-				require.NotErrorIs(t, err, context.DeadlineExceeded)
+				require.NotErrorIs(t, cerr, context.DeadlineExceeded)
 			}
 		})
 	}
@@ -222,12 +224,12 @@ func TestInterceptUpgradedIncoming(t *testing.T) {
 				}),
 			)
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
-			_, err := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
-			require.Error(t, err)
+			_, cerr := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
+			require.Error(t, cerr)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
 			// See https://github.com/nhooyr/websocket/issues/355 for details.
 			if _, err := h2.Addrs()[0].ValueForProtocol(ma.P_WS); err == nil {
-				require.NotErrorIs(t, err, context.DeadlineExceeded)
+				require.NotErrorIs(t, cerr, context.DeadlineExceeded)
 			}
 		})
 	}
