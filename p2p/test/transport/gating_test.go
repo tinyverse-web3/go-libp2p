@@ -61,10 +61,8 @@ func TestInterceptAddrDial(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			gomock.InOrder(
-				connGater.EXPECT().InterceptPeerDial(h2.ID()).Return(true),
-				connGater.EXPECT().InterceptAddrDial(h2.ID(), h2.Addrs()[0]),
-			)
+			connGater.EXPECT().InterceptPeerDial(h2.ID()).Return(true)
+			connGater.EXPECT().InterceptAddrDial(h2.ID(), h2.Addrs()[0])
 			require.ErrorIs(t, h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()}), swarm.ErrNoGoodAddresses)
 		})
 	}
@@ -84,14 +82,12 @@ func TestInterceptSecuredOutgoing(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			gomock.InOrder(
-				connGater.EXPECT().InterceptPeerDial(h2.ID()).Return(true),
-				connGater.EXPECT().InterceptAddrDial(h2.ID(), gomock.Any()).Return(true),
-				connGater.EXPECT().InterceptSecured(network.DirOutbound, h2.ID(), gomock.Any()).Do(func(_ network.Direction, _ peer.ID, addrs network.ConnMultiaddrs) {
-					// remove the certhash component from WebTransport addresses
-					require.Equal(t, stripCertHash(h2.Addrs()[0]).String(), addrs.RemoteMultiaddr().String())
-				}),
-			)
+			connGater.EXPECT().InterceptPeerDial(h2.ID()).Return(true)
+			connGater.EXPECT().InterceptAddrDial(h2.ID(), gomock.Any()).Return(true)
+			connGater.EXPECT().InterceptSecured(network.DirOutbound, h2.ID(), gomock.Any()).Do(func(_ network.Direction, _ peer.ID, addrs network.ConnMultiaddrs) {
+				// remove the certhash component from WebTransport addresses
+				require.Equal(t, stripCertHash(h2.Addrs()[0]).String(), addrs.RemoteMultiaddr().String())
+			})
 			cerr := h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
 			require.Error(t, cerr)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
@@ -117,16 +113,15 @@ func TestInterceptUpgradedOutgoing(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			gomock.InOrder(
-				connGater.EXPECT().InterceptPeerDial(h2.ID()).Return(true),
-				connGater.EXPECT().InterceptAddrDial(h2.ID(), gomock.Any()).Return(true),
-				connGater.EXPECT().InterceptSecured(network.DirOutbound, h2.ID(), gomock.Any()).Return(true),
-				connGater.EXPECT().InterceptUpgraded(gomock.Any()).Do(func(c network.Conn) {
-					// remove the certhash component from WebTransport addresses
-					require.Equal(t, stripCertHash(h2.Addrs()[0]), c.RemoteMultiaddr())
-					require.Equal(t, h1.ID(), c.LocalPeer())
-					require.Equal(t, h2.ID(), c.RemotePeer())
-				}))
+			connGater.EXPECT().InterceptPeerDial(h2.ID()).Return(true)
+			connGater.EXPECT().InterceptAddrDial(h2.ID(), gomock.Any()).Return(true)
+			connGater.EXPECT().InterceptSecured(network.DirOutbound, h2.ID(), gomock.Any()).Return(true)
+			connGater.EXPECT().InterceptUpgraded(gomock.Any()).Do(func(c network.Conn) {
+				// remove the certhash component from WebTransport addresses
+				require.Equal(t, stripCertHash(h2.Addrs()[0]), c.RemoteMultiaddr())
+				require.Equal(t, h1.ID(), c.LocalPeer())
+				require.Equal(t, h2.ID(), c.RemotePeer())
+			})
 			cerr := h1.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
 			require.Error(t, cerr)
 			// There's a bug in the WebSocket library, making Close block for up to 5s.
@@ -176,18 +171,19 @@ func TestInterceptSecuredIncoming(t *testing.T) {
 			connGater := NewMockConnectionGater(ctrl)
 
 			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true})
+			defer h1.Close()
 			h2 := tc.HostGenerator(t, TransportTestCaseOpts{ConnGater: connGater})
+			defer h2.Close()
 			require.Len(t, h2.Addrs(), 1)
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			gomock.InOrder(
-				connGater.EXPECT().InterceptAccept(gomock.Any()).Return(true),
-				connGater.EXPECT().InterceptSecured(network.DirInbound, h1.ID(), gomock.Any()).Do(func(_ network.Direction, _ peer.ID, addrs network.ConnMultiaddrs) {
-					// remove the certhash component from WebTransport addresses
-					require.Equal(t, stripCertHash(h2.Addrs()[0]), addrs.LocalMultiaddr())
-				}),
-			)
+			connGater.EXPECT().InterceptAccept(gomock.Any()).Return(true)
+			connGater.EXPECT().InterceptSecured(network.DirInbound, h1.ID(), gomock.Any()).Do(func(_ network.Direction, _ peer.ID, addrs network.ConnMultiaddrs) {
+				// remove the certhash component from WebTransport addresses
+				require.Equal(t, stripCertHash(h2.Addrs()[0]), addrs.LocalMultiaddr())
+			})
+
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
 			_, cerr := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
 			require.Error(t, cerr)
@@ -213,16 +209,14 @@ func TestInterceptUpgradedIncoming(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			gomock.InOrder(
-				connGater.EXPECT().InterceptAccept(gomock.Any()).Return(true),
-				connGater.EXPECT().InterceptSecured(network.DirInbound, h1.ID(), gomock.Any()).Return(true),
-				connGater.EXPECT().InterceptUpgraded(gomock.Any()).Do(func(c network.Conn) {
-					// remove the certhash component from WebTransport addresses
-					require.Equal(t, stripCertHash(h2.Addrs()[0]), c.LocalMultiaddr())
-					require.Equal(t, h1.ID(), c.RemotePeer())
-					require.Equal(t, h2.ID(), c.LocalPeer())
-				}),
-			)
+			connGater.EXPECT().InterceptAccept(gomock.Any()).Return(true)
+			connGater.EXPECT().InterceptSecured(network.DirInbound, h1.ID(), gomock.Any()).Return(true)
+			connGater.EXPECT().InterceptUpgraded(gomock.Any()).Do(func(c network.Conn) {
+				// remove the certhash component from WebTransport addresses
+				require.Equal(t, stripCertHash(h2.Addrs()[0]), c.LocalMultiaddr())
+				require.Equal(t, h1.ID(), c.RemotePeer())
+				require.Equal(t, h2.ID(), c.LocalPeer())
+			})
 			h1.Peerstore().AddAddrs(h2.ID(), h2.Addrs(), time.Hour)
 			_, cerr := h1.NewStream(ctx, h2.ID(), protocol.TestingID)
 			require.Error(t, cerr)
